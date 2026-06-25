@@ -1,0 +1,99 @@
+name: Sync Jira Tickets
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Fetch and update
+        env:
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+        run: |
+          cat > sync.js << 'EOF'
+          const https = require('https');
+          const fs = require('fs');
+          const auth = Buffer.from(process.env.JIRA_EMAIL + ':' + process.env.JIRA_TOKEN).toString('base64');
+          const MAP = {
+            '712020:19e84b87-2a63-4584-a099-87eed24f86e4': '장미진',
+            '712020:ac6ee917-de1d-4ec8-8c83-215625056596': '김다운',
+            '712020:1c2f6acc-e88a-4507-8d4a-cd968ca25985': '김정탁',
+            '712020:26c8baf3-b489-4ea8-a248-191a4242b0c0': '김태연',
+            '712020:58531949-bfc1-4372-9e7b-5861dd285a16': '손효정',
+            '5fa4b0f358f262007285553b': '이진용'
+          };
+          const ids = Object.keys(MAP).join('","');
+          const jql = 'assignee in ("' + ids + '") AND statusCategory != Done ORDER BY updated DESC';
+          const fields = ['summary','status','assignee','project','duedate','customfield_10014','customfield_10015','issuetype'];
+          function post(startAt) {
+            return new Promise((resolve, reject) => {
+              const body = JSON.stringify({ jql, fields, maxResults: 100, startAt });
+              const req = https.request({
+                hostname: 'musinsa-oneteam.atlassian.net',
+                path: '/rest/api/3/search/jql',
+                method: 'POST',
+                headers: {
+                  Authorization: 'Basic ' + auth,
+                  Accept: 'application/json',
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(body)
+                }
+              }, r => {
+                let d = '';
+                r.on('data', c => d += c);
+                r.on('end', () => {
+                  try { resolve({ s: r.statusCode, b: JSON.parse(d) }); }
+                  catch(e) { reject(new Error('Parse: ' + d.slice(0,200))); }
+                });
+              });
+              req.on('error', reject);
+              req.write(body);
+              req.end();
+            });
+          }
+          (async () => {
+            let all = [], start = 0;
+            while (true) {
+              const { s, b } = await post(start);
+              console.log('Status:', s, 'Issues:', (b.issues||[]).length, 'Total:', b.total);
+              if (s !== 200) throw new Error('Jira ' + s + ': ' + JSON.stringify(b).slice(0,300));
+              all = all.concat(b.issues || []);
+              if ((b.issues || []).length < 100 || all.length >= b.total) break;
+              start += 100;
+            }
+            const parsed = all.map(i => {
+              const f = i.fields;
+              const aid = (f.assignee || {}).accountId || '';
+              const proj = f.project ? f.project.key : '';
+              return {
+                key: i.key,
+                title: (f.summary || '').trim(),
+                statusName: f.status ? f.status.name : '',
+                assignee: MAP[aid] || ((f.assignee || {}).displayName || '').split('/')[0].trim(),
+                project: proj,
+                projectName: proj === 'M29CMPROD' ? '29CM' : proj === 'PD' ? '무신사' : (f.project ? f.project.name : proj),
+                duedate: f.duedate || null,
+                startdate: f.customfield_10015 || null,
+                epic: f.customfield_10014 || null,
+                issuetype: f.issuetype ? f.issuetype.name : ''
+              };
+            });
+            let html = fs.readFileSync('index.html', 'utf8');
+            html = html.replace(/const RAW=\[[\s\S]*?\];/, 'const RAW=' + JSON.stringify(parsed) + ';');
+            fs.writeFileSync('index.html', html);
+            console.log('Updated', parsed.length, 'tickets');
+          })().catch(e => { console.error(e.message); process.exit(1); });
+          EOF
+          node sync.js
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --staged --quiet || git commit -m "Auto sync Jira $(date '+%Y-%m-%d %H:%M')"
+          git push
