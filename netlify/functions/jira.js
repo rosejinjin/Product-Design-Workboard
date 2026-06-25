@@ -22,21 +22,16 @@ exports.handler = async () => {
 
   try {
     while (true) {
-      const res = await fetch(`${JIRA_BASE}/rest/api/3/search/jql`, {
-        method: 'POST',
-        headers: {
-          Authorization: AUTH,
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ jql, fieldsByKeys: false, fields: fields.split(','), maxResults: 100, startAt }),
+      const url = `${JIRA_BASE}/rest/api/2/search?` + new URLSearchParams({
+        jql, fields, maxResults: 100, startAt
       });
-
+      const res = await fetch(url, {
+        headers: { Authorization: AUTH, Accept: 'application/json' }
+      });
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error(`Jira API ${res.status}: ${txt.slice(0,200)}`);
+        throw new Error(`Jira API ${res.status}: ${txt.slice(0,300)}`);
       }
-
       const data = await res.json();
       allIssues = allIssues.concat(data.issues || []);
       if ((data.issues || []).length < 100 || allIssues.length >= data.total) break;
