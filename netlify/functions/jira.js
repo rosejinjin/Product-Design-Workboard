@@ -15,19 +15,34 @@ const ASSIGNEE_MAP = {
 exports.handler = async () => {
   const accountIds = Object.keys(ASSIGNEE_MAP).join('","');
   const jql = `assignee in ("${accountIds}") AND statusCategory != Done ORDER BY updated DESC`;
-  const fields = 'summary,status,assignee,project,duedate,customfield_10014,customfield_10015,issuetype';
+  const fields = ['summary','status','assignee','project','duedate','customfield_10014','customfield_10015','issuetype'];
+
   let allIssues = [];
   let startAt = 0;
+
   try {
     while (true) {
-      const url = `${JIRA_BASE}/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&fields=${fields}&maxResults=100&startAt=${startAt}`;
-      const res = await fetch(url, { headers: { Authorization: AUTH, Accept: 'application/json' } });
-      if (!res.ok) throw new Error(`Jira API ${res.status}`);
+      const res = await fetch(`${JIRA_BASE}/rest/api/3/search/jql`, {
+        method: 'POST',
+        headers: {
+          Authorization: AUTH,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ jql, fields, maxResults: 100, startAt }),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`Jira API ${res.status}: ${txt.slice(0,200)}`);
+      }
+
       const data = await res.json();
       allIssues = allIssues.concat(data.issues || []);
-      if (data.issues.length < 100 || allIssues.length >= data.total) break;
+      if ((data.issues || []).length < 100 || allIssues.length >= data.total) break;
       startAt += 100;
     }
+
     const parsed = allIssues.map(i => {
       const f = i.fields;
       const assigneeId = (f.assignee || {}).accountId || '';
@@ -46,6 +61,7 @@ exports.handler = async () => {
         issuetype: f.issuetype?.name || '',
       };
     });
+
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
