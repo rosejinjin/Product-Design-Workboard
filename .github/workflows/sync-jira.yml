@@ -1,0 +1,114 @@
+이제 워크플로우 파일만 올리면 돼요.
+
+GitHub 리포 → **Add file** → **Create new file**
+
+파일 이름 칸에 `.github/workflows/sync-jira.yml` 입력하고 아래 내용 붙여넣기 → **Commit changes**
+
+```yaml
+name: Sync Jira Tickets
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch Jira tickets and update index.html
+        env:
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+        run: |
+          node << 'SCRIPT'
+          const https = require('https');
+          const fs = require('fs');
+
+          const email = process.env.JIRA_EMAIL;
+          const token = process.env.JIRA_TOKEN;
+          const auth = Buffer.from(`${email}:${token}`).toString('base64');
+
+          const ASSIGNEE_MAP = {
+            '712020:19e84b87-2a63-4584-a099-87eed24f86e4': '장미진',
+            '712020:ac6ee917-de1d-4ec8-8c83-215625056596': '김다운',
+            '712020:1c2f6acc-e88a-4507-8d4a-cd968ca25985': '김정탁',
+            '712020:26c8baf3-b489-4ea8-a248-191a4242b0c0': '김태연',
+            '712020:58531949-bfc1-4372-9e7b-5861dd285a16': '손효정',
+            '5fa4b0f358f262007285553b': '이진용',
+          };
+
+          const accountIds = Object.keys(ASSIGNEE_MAP).join('","');
+          const jql = `assignee in ("${accountIds}") AND statusCategory != Done ORDER BY updated DESC`;
+          const fields = 'summary,status,assignee,project,duedate,customfield_10014,customfield_10015,issuetype';
+
+          function jiraGet(startAt) {
+            return new Promise((resolve, reject) => {
+              const path = `/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=${fields}&maxResults=100&startAt=${startAt}`;
+              const options = {
+                hostname: 'musinsa-oneteam.atlassian.net',
+                path,
+                headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' }
+              };
+              https.get(options, res => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                  try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+                  catch(e) { reject(new Error(`Parse error: ${data.slice(0,200)}`)); }
+                });
+              }).on('error', reject);
+            });
+          }
+
+          async function main() {
+            let allIssues = [];
+            let startAt = 0;
+            while (true) {
+              const { status, body } = await jiraGet(startAt);
+              if (status !== 200) throw new Error(`Jira ${status}: ${JSON.stringify(body).slice(0,200)}`);
+              allIssues = allIssues.concat(body.issues || []);
+              if ((body.issues || []).length < 100 || allIssues.length >= body.total) break;
+              startAt += 100;
+            }
+
+            const parsed = allIssues.map(i => {
+              const f = i.fields;
+              const assigneeId = (f.assignee || {}).accountId || '';
+              const assignee = ASSIGNEE_MAP[assigneeId] || (f.assignee || {}).displayName?.split('/')[0].trim() || '';
+              const proj = f.project?.key || '';
+              return {
+                key: i.key,
+                title: (f.summary || '').trim(),
+                statusName: f.status?.name || '',
+                assignee,
+                project: proj,
+                projectName: proj === 'M29CMPROD' ? '29CM' : proj === 'PD' ? '무신사' : (f.project?.name || proj),
+                duedate: f.duedate || null,
+                startdate: f.customfield_10015 || null,
+                epic: f.customfield_10014 || null,
+                issuetype: f.issuetype?.name || '',
+              };
+            });
+
+            let html = fs.readFileSync('index.html', 'utf8');
+            html = html.replace(/const RAW=\[[\s\S]*?\];/, `const RAW=${JSON.stringify(parsed)};`);
+            fs.writeFileSync('index.html', html);
+            console.log(`Updated ${parsed.length} tickets`);
+          }
+
+          main().catch(e => { console.error(e.message); process.exit(1); });
+          SCRIPT
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --staged --quiet || git commit -m "Auto sync Jira tickets $(date '+%Y-%m-%d %H:%M')"
+          git push
+```
