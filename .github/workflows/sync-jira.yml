@@ -34,7 +34,7 @@ jobs:
             return new Promise((res, rej) => {
               const req = https.get({
                 hostname: 'musinsa-oneteam.atlassian.net',
-                path: `/rest/api/2/search?jql=${jql}&fields=${fields}&maxResults=100&startAt=${startAt}`,
+                path: `/rest/api/3/search/jql?jql=${jql}&fields=${fields}&maxResults=100&startAt=${startAt}`,
                 headers: { Authorization: 'Basic ' + auth, Accept: 'application/json' }
               }, r => { let d = ''; r.on('data', c => d += c); r.on('end', () => res({ s: r.statusCode, b: JSON.parse(d) })); });
               req.on('error', rej);
