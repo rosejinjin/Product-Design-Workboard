@@ -20,7 +20,7 @@ exports.handler = async () => {
   let startAt = 0;
   try {
     while (true) {
-      const url = `${JIRA_BASE}/rest/api/3/search?jql=${encodeURIComponent(jql)}&fields=${fields}&maxResults=100&startAt=${startAt}`;
+      const url = `${JIRA_BASE}/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&fields=${fields}&maxResults=100&startAt=${startAt}`;
       const res = await fetch(url, { headers: { Authorization: AUTH, Accept: 'application/json' } });
       if (!res.ok) throw new Error(`Jira API ${res.status}`);
       const data = await res.json();
