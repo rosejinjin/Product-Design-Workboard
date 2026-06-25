@@ -15,7 +15,7 @@ const ASSIGNEE_MAP = {
 exports.handler = async () => {
   const accountIds = Object.keys(ASSIGNEE_MAP).join('","');
   const jql = `assignee in ("${accountIds}") AND statusCategory != Done ORDER BY updated DESC`;
-  const fields = ['summary','status','assignee','project','duedate','customfield_10014','customfield_10015','issuetype'];
+  const fields = 'summary,status,assignee,project,duedate,customfield_10014,customfield_10015,issuetype';
 
   let allIssues = [];
   let startAt = 0;
@@ -29,7 +29,7 @@ exports.handler = async () => {
           Accept: 'application/json',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ jql, fields, maxResults: 100, startAt }),
+        body: JSON.stringify({ jql, fieldsByKeys: false, fields: fields.split(','), maxResults: 100, startAt }),
       });
 
       if (!res.ok) {
