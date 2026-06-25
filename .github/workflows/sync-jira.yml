@@ -28,16 +28,23 @@ jobs:
             '5fa4b0f358f262007285553b': '이진용'
           };
           const ids = Object.keys(MAP).join('","');
-          const jql = encodeURIComponent(`assignee in ("${ids}") AND statusCategory != Done ORDER BY updated DESC`);
+          const jql = encodeURIComponent('assignee in ("' + ids + '") AND statusCategory != Done ORDER BY updated DESC');
           const fields = 'summary,status,assignee,project,duedate,customfield_10014,customfield_10015,issuetype';
           function get(startAt) {
-            return new Promise((res, rej) => {
+            return new Promise((resolve, reject) => {
               const req = https.get({
                 hostname: 'musinsa-oneteam.atlassian.net',
-                path: `/rest/api/3/search/jql?jql=${jql}&fields=${fields}&maxResults=100&startAt=${startAt}`,
+                path: '/rest/api/3/search/jql?jql=' + jql + '&fields=' + fields + '&maxResults=100&startAt=' + startAt,
                 headers: { Authorization: 'Basic ' + auth, Accept: 'application/json' }
-              }, r => { let d = ''; r.on('data', c => d += c); r.on('end', () => res({ s: r.statusCode, b: JSON.parse(d) })); });
-              req.on('error', rej);
+              }, r => {
+                let d = '';
+                r.on('data', c => d += c);
+                r.on('end', () => {
+                  try { resolve({ s: r.statusCode, b: JSON.parse(d) }); }
+                  catch(e) { reject(new Error('Parse error: ' + d.slice(0,200))); }
+                });
+              });
+              req.on('error', reject);
             });
           }
           (async () => {
@@ -46,18 +53,24 @@ jobs:
               const { s, b } = await get(start);
               if (s !== 200) throw new Error('Jira ' + s + ': ' + JSON.stringify(b).slice(0,200));
               all = all.concat(b.issues || []);
-              if ((b.issues||[]).length < 100 || all.length >= b.total) break;
+              if ((b.issues || []).length < 100 || all.length >= b.total) break;
               start += 100;
             }
             const parsed = all.map(i => {
-              const f = i.fields, aid = (f.assignee||{}).accountId||'';
-              const proj = f.project?.key||'';
+              const f = i.fields;
+              const aid = (f.assignee || {}).accountId || '';
+              const proj = f.project ? f.project.key : '';
               return {
-                key: i.key, title: (f.summary||'').trim(), statusName: f.status?.name||'',
-                assignee: MAP[aid]||(f.assignee||{}).displayName?.split('/')[0].trim()||'',
-                project: proj, projectName: proj==='M29CMPROD'?'29CM':proj==='PD'?'무신사':(f.project?.name||proj),
-                duedate: f.duedate||null, startdate: f.customfield_10015||null,
-                epic: f.customfield_10014||null, issuetype: f.issuetype?.name||''
+                key: i.key,
+                title: (f.summary || '').trim(),
+                statusName: f.status ? f.status.name : '',
+                assignee: MAP[aid] || ((f.assignee || {}).displayName || '').split('/')[0].trim(),
+                project: proj,
+                projectName: proj === 'M29CMPROD' ? '29CM' : proj === 'PD' ? '무신사' : (f.project ? f.project.name : proj),
+                duedate: f.duedate || null,
+                startdate: f.customfield_10015 || null,
+                epic: f.customfield_10014 || null,
+                issuetype: f.issuetype ? f.issuetype.name : ''
               };
             });
             let html = fs.readFileSync('index.html', 'utf8');
